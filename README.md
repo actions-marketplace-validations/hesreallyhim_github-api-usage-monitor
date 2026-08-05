@@ -1,5 +1,10 @@
 ![Banner](./docs/assets/banner.svg)
 
+[![CodeQL](https://github.com/hesreallyhim/github-api-usage-monitor/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/hesreallyhim/github-api-usage-monitor/actions/workflows/github-code-scanning/codeql)
+[![Dependabot Updates](https://github.com/hesreallyhim/github-api-usage-monitor/actions/workflows/dependabot/dependabot-updates/badge.svg)](https://github.com/hesreallyhim/github-api-usage-monitor/actions/workflows/dependabot/dependabot-updates)
+![GitHub License](https://img.shields.io/github/license/hesreallyhim/github-api-usage-monitor)
+![GitHub Release](https://img.shields.io/github/v/release/hesreallyhim/github-api-usage-monitor)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/hesreallyhim/github-api-usage-monitor/badge)](https://scorecard.dev/viewer/?uri=github.com/hesreallyhim/github-api-usage-monitor)
 # github-api-usage-monitor
 
 A GitHub Action that monitors GitHub API usage during a workflow job. It safely polls `/rate_limit` in a background process throughout the job, then renders a per-bucket usage summary in the step summary.
@@ -9,7 +14,7 @@ GitHub Actions workflows may query the GitHub API and consume rate limits, but t
 ## Quick Start
 
 ```yaml
-- uses: hesreallyhim/github-api-usage-monitor@v1
+- uses: hesreallyhim/github-api-usage-monitor@v2
 ```
 
 That's it. Insert that anywhere in your workflow job. The action uses the pre/post hook lifecycle — it starts monitoring automatically before your first step and reports after your last step. No `start`/`stop` steps needed.
@@ -48,7 +53,7 @@ jobs:
   usage-tracker:
     runs-on: ubuntu-latest
     steps:
-      - uses: hesreallyhim/github-api-usage-monitor@v1
+      - uses: hesreallyhim/github-api-usage-monitor@v2
         with:
           diagnostics: true
       # ... The rest of your workflow - calls to GitHub API
@@ -90,13 +95,14 @@ Windows is not supported (the action will fail fast with a clear error).
 
 ## Limitations
 
-- **`GITHUB_TOKEN` limits** - the `/rate_limit` endpoint returns data that reflects the per-bucket limits for authenticated users (e.g. 5,000 requests per hour for `core`). However, the [documentation](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28#primary-rate-limit-for-github_token-in-github-actions) states that `GITHUB_TOKEN`, the token that is automatically generated for consumption by GitHub Actions, has a general rate limit of 1,000 requests per repository per hour (or 15,000 requests for GHEC). We have chosen to report the rate limit data that is returned from the `/rate_limit` API "transparently" - that is, we do not attempt to modify reports to accommodate the special limitations of `GITHUB_TOKEN`.
+- **`GITHUB_TOKEN` limits** - the `/rate_limit` endpoint returns data that reflects the per-bucket limits for authenticated users (e.g. 5,000 requests per hour for `core`). However, the [documentation](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2026-03-10#primary-rate-limit-for-github_token-in-github-actions) states that `GITHUB_TOKEN`, the token that is automatically generated for consumption by GitHub Actions, has a general rate limit of 1,000 requests per repository per hour (or 15,000 requests for GHEC). We have chosen to report the rate limit data that is returned from the `/rate_limit` API "transparently" - that is, we do not attempt to modify reports to accommodate the special limitations of `GITHUB_TOKEN`.
 - **Shared rate-limit pool** — rate limits are shared amongst all jobs in a repository that use the same token. If concurrent workflows run, usage from other jobs (that use the same token) will appear in the report.
 - **Polling resolution** — the poller is configured to run every 30 seconds by default, but this allows the possibility of a gap between the last poll and reset time for 60-second buckets such as `search`. In order to account for this, we have designed an _adaptive_ poller that targets polls near bucket resets and runs a few extra times; nevertheless, there's still an inherent ~3-5s uncertainty window which is unavoidable given the current design. Usage between the last poll and a reset boundary may be missed.
-- **Bucket mirroring irregularity** - we have regularly observed a pattern in which the `core` bucket usage, as reported by the `/rate_limit` endpoint, and the `code_scanning_upload` bucket, report the same data. This is undocumented behavior, but does not appear to affect overall rate limits, in the sense that 5 `core` requests may appear to consume 5 `code_scanning_upload` requests, but we have no evidence that this results in a 10-request total usage consumption.
+- **Deprecated code scanning upload bucket** - GitHub documents code scanning uploads as counted under the `core` bucket. If a stale or legacy response still includes `resources.code_scanning_upload`, this action intentionally ignores that deprecated alias so usage is not double-counted. See GitHub's [deprecation notice](https://github.blog/changelog/2026-05-05-deprecation-notice-code_scanning_upload-field-will-be-removed-from-rate_limit-api-endpoint/).
+- **Newly introduced buckets** - GitHub occasionally adds new `/rate_limit` buckets, such as `copilot_usage_records`, without requiring client changes. This action does not maintain an allowlist for reportable buckets, so it will surface newly introduced buckets automatically unless GitHub documents them as deprecated aliases.
 - **Querying the `/rate_limit` endpoint** - The action measures API usage by querying the `rate_limit` endpoint. A natural concern is - doesn't this impact the measurement itself? Fortunately, querying the `rate_limit` [endpoint](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28#checking-the-status-of-your-rate-limit) does _not_ affect the primary rate limit for a given token. Therefore it is harmless from that perspective. Nevertheless, overly aggressive polling or abuse of that endpoint _can_ result in a violation of GitHub's _secondary_ rate limit.
 - The secondary rate limit is broad in scope, and is meant to deter and penalize activity that is harmful to GitHub's servers. However, no clear statement of the secondary rate limit policy is available, and, by design, there is no way to query anything about the secondary rate limit. Given our experience, and what is documented, one request every 30 seconds (give or take) is within the realm of acceptability and non-abusive polling - however, it is important to keep this in mind when interacting with the GitHub API.
-- This action's poller implements controls that are designed to avoid any secondary rate violations, however we _cannot_ provide any strong guarantee that this action will _definitely not_ trigger any secondary rate limit violations, due to the fact that this limit is, by nature, not entirely explicit. Furthermore, we do not accept any responsibility for secondary rate limit abuse that users may incur while using this action. You may review the source code in [`src/poller/rate-limit-control.ts`](./src/poller/rate-limit-control.ts) to confirm that we have built-in strict protections against rate limit abuse that correspond to every single line in the [documentation](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28#exceeding-the-rate-limit) regarding rate limit errors and how to respond to them.
+- This action's poller implements controls that are designed to avoid any secondary rate violations, however we _cannot_ provide any strong guarantee that this action will _definitely not_ trigger any secondary rate limit violations, due to the fact that this limit is, by nature, not entirely explicit. Furthermore, we do not accept any responsibility for secondary rate limit abuse that users may incur while using this action. You may review the source code in [`src/poller/rate-limit-control.ts`](./src/poller/rate-limit-control.ts) to confirm that we have built-in strict protections against rate limit abuse that correspond to every single line in the [documentation](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2026-03-10#exceeding-the-rate-limit) regarding rate limit errors and how to respond to them.
 
 ## Reset Windows
 - **Windows crossed** — the number of times a bucket reset occurred while the monitor was running.

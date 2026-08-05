@@ -53,7 +53,7 @@ regressions and to verify the poller and post hook behave as expected.
 
 ### What they are
 
-- Workflow files: `.github/workflows/self-test.yml` and `.github/workflows/realistic-test.yml`
+- Workflow files: `.github/workflows/self-test.yml.disabled` and `.github/workflows/realistic-test.yml.disabled`
 - Generator: `scripts/generate-self-test.ts`
 - Scenarios manifest: `scripts/scenarios.ts` (inputs) and `scripts/self-test-manifest.json` (generated)
 - Scenario runner: `scripts/run-scenario.mjs`
@@ -64,19 +64,19 @@ regressions and to verify the poller and post hook behave as expected.
 
 - **Source of truth**: `scripts/scenarios.ts` defines all scenarios.
 - Run `npm run generate:self-test` to regenerate:
-  - `.github/workflows/self-test.yml`
-  - `.github/workflows/realistic-test.yml` (only if realistic scenarios exist)
+  - `.github/workflows/self-test.yml.disabled`
+  - `.github/workflows/realistic-test.yml.disabled` (only if realistic scenarios exist)
   - `scripts/self-test-manifest.json`
 - Do not hand-edit the generated workflow files. The header in each workflow
   indicates they are auto-generated.
 
 ### When and why to run
 
-- Use **Self-Test** (`self-test.yml`) for quick regression checks after changes
-  to reducer logic, polling behavior, state handling, or output formatting.
-- Use **Realistic Test** (`realistic-test.yml`) for longer-duration behavior or
-  more production-like traffic patterns. This is intentionally separate to avoid
-  slowing normal self-tests.
+- `self-test.yml.disabled` preserves the shorter controlled regression scenarios
+  for reducer logic, polling behavior, state handling, and output formatting.
+- `realistic-test.yml.disabled` preserves the longer-duration, production-like
+  traffic pattern as an inactive workflow. Re-enable it only for deliberate
+  soak-test work or after adding assertions that make it useful as a CI signal.
 - Both workflows require `diagnostics: true` so they can download and analyze
   the diagnostics artifact. This is handled in the generator.
 
@@ -92,6 +92,63 @@ regressions and to verify the poller and post hook behave as expected.
 - Diagnostics artifacts include `state.json` and `poll-log.json`.
 - If diagnostics are disabled in the action input, the self-test diagnostics
   jobs will not have artifacts to download and will fail.
+
+## Docs-watch maintenance
+
+The docs-watch process is local-only and intended for maintainers.
+
+- Do not store upstream GitHub documentation bodies in this public repository.
+- Monitored metadata lives in `docs/github-documentation/watch-list.json`.
+- Local private state defaults to `.tmp/docs-watch/state` and stores snapshots
+  used for diffing.
+- For recurring runs, prefer a stable private path outside the worktree via
+  `DOC_WATCH_STATE_DIR` so snapshots survive `.tmp/` cleanup and worktree churn.
+- If remote snapshots and readable diff artifacts also need to stay outside the
+  worktree, set `DOC_WATCH_REMOTE_DIR` and `DOC_WATCH_REVIEW_DIR` to private
+  paths under the same state root.
+
+### Local commands
+
+- Seed or refresh baseline snapshots:
+  - `npm run sync:github-docs-state`
+- Bootstrap-aware review entrypoint (recommended):
+  - `npm run docs-watch:review`
+- Run check + diff + report (standard weekly run):
+  - `npm run docs-watch:local`
+- Individual steps:
+  - `npm run check:github-docs`
+  - `npm run diff:github-docs`
+  - `npm run report:github-docs`
+
+### Run artifacts
+
+- Check payload: `${DOC_WATCH_REVIEW_DIR:-.tmp/docs-watch}/docs-check.json`
+- Unified diff markdown: `${DOC_WATCH_REVIEW_DIR:-.tmp/docs-watch}/docs-diff.md`
+- Unified diff patch: `${DOC_WATCH_REVIEW_DIR:-.tmp/docs-watch}/docs-diff.patch`
+- Always-on run report (generated every run): `${DOC_WATCH_REVIEW_DIR:-.tmp/docs-watch}/docs-watch-report.md`
+
+### Maintainer review loop
+
+1. Prefer `npm run docs-watch:review` (or let weekly Codex automation use the
+   same protocol).
+2. Review the generated `docs-watch-report.md` for correctness.
+3. If the report status is `bootstrap-required`, do not open or update a PR from
+   that run. Seed private state with `npm run sync:github-docs-state`, then rerun
+   the exact review.
+4. Only if the synced exact review still reports `changed: true`, validate impact
+   classification and decide if project updates are required.
+5. If required, open/update a draft fix PR with project and metadata changes
+   only.
+
+### Recommended protocol
+
+1. Set a stable private state directory, for example:
+   - `export DOC_WATCH_STATE_DIR="$HOME/.local/state/github-api-usage-monitor/docs-watch"`
+   - `export DOC_WATCH_REMOTE_DIR="$DOC_WATCH_STATE_DIR/remote"`
+   - `export DOC_WATCH_REVIEW_DIR="$DOC_WATCH_STATE_DIR/review"`
+2. Run `npm run docs-watch:review`.
+3. Treat the first seeded run as bootstrap, not as a source of patch review.
+4. Only create PRs from an exact synced run with `changed: true`.
 
 ## Notes
 

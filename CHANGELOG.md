@@ -1,5 +1,45 @@
 # Changelog
 
+## [2.1.0](https://github.com/hesreallyhim/github-api-usage-monitor/compare/v2.0.2...v2.1.0) (2026-07-04)
+
+
+### Features
+
+* update tracked buckets ([#120](https://github.com/hesreallyhim/github-api-usage-monitor/issues/120)) ([6f17010](https://github.com/hesreallyhim/github-api-usage-monitor/commit/6f170106b361fe6776b5e5fda21f72b52936697a))
+* use latest api version 2026 ([#118](https://github.com/hesreallyhim/github-api-usage-monitor/issues/118)) ([e3f3b5d](https://github.com/hesreallyhim/github-api-usage-monitor/commit/e3f3b5dd6ae13d5733cbc299c7bf73b76285a3a3))
+
+## [2.0.2](https://github.com/hesreallyhim/github-api-usage-monitor/compare/v2.0.1...v2.0.2) (2026-05-07)
+
+
+### Bug Fixes
+
+* ignore deprecated code scanning upload bucket ([e37b144](https://github.com/hesreallyhim/github-api-usage-monitor/commit/e37b1449867048f1b23ffc7fb96f4d0632387869))
+
+## [2.0.1](https://github.com/hesreallyhim/github-api-usage-monitor/compare/v2.0.0...v2.0.1) (2026-05-01)
+
+
+### Miscellaneous Chores
+
+* harden workflow configuration ([ee097c2](https://github.com/hesreallyhim/github-api-usage-monitor/commit/ee097c2c6c36393c8234311caa8a5fd224f4e4bb))
+
+## [2.0.0](https://github.com/hesreallyhim/github-api-usage-monitor/compare/v1.2.0...v2.0.0) (2026-04-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* upgrade to node 24
+
+### Miscellaneous Chores
+
+* upgrade to node 24 ([10c7aab](https://github.com/hesreallyhim/github-api-usage-monitor/commit/10c7aab356907d8429a433cdd99ac4741e57ef23))
+
+## [1.2.0](https://github.com/hesreallyhim/github-api-usage-monitor/compare/v1.1.1...v1.2.0) (2026-04-02)
+
+
+### Features
+
+* add docs watch run report output ([4458cca](https://github.com/hesreallyhim/github-api-usage-monitor/commit/4458cca6117b87f718ce78795b9219e26b56e35b))
+
 ## [1.1.1](https://github.com/hesreallyhim/github-api-usage-monitor/compare/v1.1.0...v1.1.1) (2026-02-04)
 
 

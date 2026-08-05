@@ -10,6 +10,7 @@
 
 import type { RateLimitResponse, RateLimitSample } from './types';
 import { FETCH_TIMEOUT_MS } from './types';
+import { isIgnoredRateLimitBucket } from './buckets';
 import { isARealObject } from './utils';
 // -----------------------------------------------------------------------------
 // Constants
@@ -17,6 +18,7 @@ import { isARealObject } from './utils';
 
 const RATE_LIMIT_URL = 'https://api.github.com/rate_limit';
 const USER_AGENT = 'github-api-usage-monitor';
+export const GITHUB_API_VERSION = '2026-03-10';
 
 // -----------------------------------------------------------------------------
 // Port: github.fetchRateLimit
@@ -66,7 +68,7 @@ export async function fetchRateLimit(token: string): Promise<FetchRateLimitOutco
         Authorization: `Bearer ${token}`,
         Accept: 'application/vnd.github+json',
         'User-Agent': USER_AGENT,
-        'X-GitHub-Api-Version': '2022-11-28',
+        'X-GitHub-Api-Version': GITHUB_API_VERSION,
       },
     });
 
@@ -190,6 +192,9 @@ export function parseRateLimitResponse(raw: unknown): RateLimitResponse | null {
   const resources: Record<string, RateLimitSample> = {};
 
   for (const [key, value] of Object.entries(raw['resources'])) {
+    if (isIgnoredRateLimitBucket(key)) {
+      continue;
+    }
     if (!isValidSample(value)) {
       continue; // Skip invalid resources instead of failing the entire response
     }

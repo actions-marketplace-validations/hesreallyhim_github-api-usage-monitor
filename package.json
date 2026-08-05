@@ -1,6 +1,6 @@
 {
   "name": "github-api-usage-monitor",
-  "version": "1.1.1",
+  "version": "2.1.0",
   "type": "module",
   "description": "Monitor GitHub API usage of a GitHub Action over the course of a job, with bucket-level reporting",
   "main": "dist/main.js",
@@ -23,7 +23,12 @@
     "lint:fix": "eslint src test --fix",
     "typecheck": "tsc --noEmit",
     "generate:self-test": "tsx scripts/generate-self-test.ts",
-    "check:github-docs": "node scripts/check-github-docs.mjs --output docs/github-documentation/docs-check.json --write-summary",
+    "check:github-docs": "node scripts/check-github-docs.mjs --state-dir \"${DOC_WATCH_STATE_DIR:-.tmp/docs-watch/state}\" --remote-snapshots-dir \"${DOC_WATCH_REMOTE_DIR:-.tmp/docs-watch/remote}\" --output \"${DOC_WATCH_REVIEW_DIR:-.tmp/docs-watch}/docs-check.json\" --write-summary",
+    "diff:github-docs": "node scripts/render-github-doc-diff.mjs --check \"${DOC_WATCH_REVIEW_DIR:-.tmp/docs-watch}/docs-check.json\" --output \"${DOC_WATCH_REVIEW_DIR:-.tmp/docs-watch}/docs-diff.md\" --patch-output \"${DOC_WATCH_REVIEW_DIR:-.tmp/docs-watch}/docs-diff.patch\" --write-summary",
+    "report:github-docs": "node scripts/write-docs-watch-report.mjs --check \"${DOC_WATCH_REVIEW_DIR:-.tmp/docs-watch}/docs-check.json\" --diff \"${DOC_WATCH_REVIEW_DIR:-.tmp/docs-watch}/docs-diff.patch\" --diff-markdown \"${DOC_WATCH_REVIEW_DIR:-.tmp/docs-watch}/docs-diff.md\" --output \"${DOC_WATCH_REVIEW_DIR:-.tmp/docs-watch}/docs-watch-report.md\" --write-summary",
+    "docs-watch:local": "npm run check:github-docs && npm run diff:github-docs && npm run report:github-docs",
+    "docs-watch:review": "node scripts/run-docs-watch-review.mjs",
+    "sync:github-docs-state": "node scripts/check-github-docs.mjs --state-dir \"${DOC_WATCH_STATE_DIR:-.tmp/docs-watch/state}\" --write-state --update-manifest --output \"${DOC_WATCH_REVIEW_DIR:-.tmp/docs-watch}/docs-check-sync.json\" --write-summary",
     "clean": "rm -rf dist",
     "prepare": "husky",
     "prepublishOnly": "npm run build:all"
@@ -37,26 +42,30 @@
   "author": "Really Him",
   "license": "MIT",
   "devDependencies": {
-    "@actions/artifact": "^6.2.0",
-    "@actions/core": "^3.0.0",
-    "@actions/github": "^9.0.0",
+    "@actions/artifact": "^6.2.1",
+    "@actions/core": "^3.0.1",
+    "@actions/github": "^9.1.1",
     "@eslint/js": "^10.0.1",
-    "@types/node": "^25.3.5",
-    "@typescript-eslint/eslint-plugin": "^8.56.0",
-    "@typescript-eslint/parser": "^8.56.0",
-    "@vercel/ncc": "^0.38.4",
-    "@vitest/coverage-v8": "^4.0.18",
-    "eslint": "^10.0.2",
+    "@types/node": "^26.1.2",
+    "@typescript-eslint/eslint-plugin": "^8.66.0",
+    "@typescript-eslint/parser": "^8.66.0",
+    "@vercel/ncc": "^0.44.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
-    "globals": "^17.4.0",
+    "globals": "^17.9.0",
     "husky": "^9.1.7",
-    "prettier": "^3.8.1",
-    "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.56.0",
-    "vitest": "^4.0.18"
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.5",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.66.0",
+    "vitest": "^4.1.10"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24.0.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "fsevents@2.3.3": true
   }
 }

@@ -80,6 +80,19 @@ const FETCH_TIMEOUT_MS = 10000;
 /** Maximum poller lifetime as defense-in-depth (6 hours in milliseconds) */
 const MAX_LIFETIME_MS = 6 * 60 * 60 * 1000;
 
+;// CONCATENATED MODULE: ./src/buckets.ts
+/**
+ * Rate-limit bucket policy.
+ *
+ * GitHub documents code scanning uploads as accounted under the core bucket.
+ * If the deprecated resources.code_scanning_upload alias still appears in
+ * /rate_limit responses or examples, ignore it so usage is not double-counted.
+ */
+const IGNORED_RATE_LIMIT_BUCKETS = new Set(['code_scanning_upload']);
+function isIgnoredRateLimitBucket(name) {
+    return IGNORED_RATE_LIMIT_BUCKETS.has(name);
+}
+
 ;// CONCATENATED MODULE: ./src/utils.ts
 /**
  * Checks if input is an object and not null.
@@ -123,11 +136,13 @@ function utils_sleep(ms) {
  */
 
 
+
 // -----------------------------------------------------------------------------
 // Constants
 // -----------------------------------------------------------------------------
 const RATE_LIMIT_URL = 'https://api.github.com/rate_limit';
 const USER_AGENT = 'github-api-usage-monitor';
+const GITHUB_API_VERSION = '2026-03-10';
 /**
  * Fetches rate limit data from GitHub API.
  *
@@ -147,7 +162,7 @@ async function fetchRateLimit(token) {
                 Authorization: `Bearer ${token}`,
                 Accept: 'application/vnd.github+json',
                 'User-Agent': USER_AGENT,
-                'X-GitHub-Api-Version': '2022-11-28',
+                'X-GitHub-Api-Version': GITHUB_API_VERSION,
             },
         });
         clearTimeout(timeoutId);
@@ -257,6 +272,9 @@ function parseRateLimitResponse(raw) {
     }
     const resources = {};
     for (const [key, value] of Object.entries(raw['resources'])) {
+        if (isIgnoredRateLimitBucket(key)) {
+            continue;
+        }
         if (!isValidSample(value)) {
             continue; // Skip invalid resources instead of failing the entire response
         }
@@ -873,7 +891,7 @@ function readPollLog() {
  * Pure logic for handling 403/429 responses and gating poll cadence.
  *
  * Based on guidance in current docs at time of writing:
- * https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28#exceeding-the-rate-limit
+ * https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2026-03-10#exceeding-the-rate-limit
  */
 const MAX_SECONDARY_RETRIES = 5;
 const SECONDARY_DEFAULT_WAIT_MS = 60_000;
@@ -998,6 +1016,7 @@ function buildRateLimitErrorEntry(event, pollNumber, timestamp, decision) {
 
 
 
+
 /**
  * Builds a diagnostics poll log entry from reduce results and raw API data.
  * Pure function — testable with zero mocks.
@@ -1005,6 +1024,9 @@ function buildRateLimitErrorEntry(event, pollNumber, timestamp, decision) {
 function buildDiagnosticsEntry(reduceResult, rateLimitData, pollNumber, timestamp) {
     const bucketSnapshots = {};
     for (const [name, update] of Object.entries(reduceResult.updates)) {
+        if (isIgnoredRateLimitBucket(name)) {
+            continue;
+        }
         const sample = rateLimitData.resources[name];
         if (sample) {
             bucketSnapshots[name] = {

@@ -13,35 +13,19 @@ function getArgValue(flag, fallback = null) {
   return value ?? fallback;
 }
 
-const docsDir = getArgValue('--dir', 'docs/github-documentation');
+const manifestPath = getArgValue('--manifest', 'docs/github-documentation/watch-list.json');
 const outputPath = getArgValue('--output', null);
+const stateDir = getArgValue('--state-dir', null);
+const remoteSnapshotsDir = getArgValue('--remote-snapshots-dir', null);
 const useLocal = args.includes('--use-local');
-const updateFrontmatter = args.includes('--update-frontmatter');
+const updateManifest = args.includes('--update-manifest') || args.includes('--update-frontmatter');
+const writeState = args.includes('--write-state');
 const failOnChange = args.includes('--fail-on-change');
 const writeSummary = args.includes('--write-summary');
+const includeDiffSnippets = args.includes('--include-diff-snippets');
 
-function splitFrontmatter(text) {
-  const match = text.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?/);
-  if (!match) {
-    return null;
-  }
-  const frontmatter = match[1];
-  const body = text.slice(match[0].length);
-  return { frontmatter, body };
-}
-
-function parseFrontmatterMap(frontmatter) {
-  const map = new Map();
-  for (const line of frontmatter.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const idx = line.indexOf(':');
-    if (idx === -1) continue;
-    const key = line.slice(0, idx).trim();
-    const value = line.slice(idx + 1).trim();
-    map.set(key, value);
-  }
-  return map;
+if (writeState && !stateDir) {
+  throw new Error('--write-state requires --state-dir');
 }
 
 function normalizeBody(text) {
@@ -58,7 +42,7 @@ function truncateLine(line, maxLength = 200) {
   return `${line.slice(0, maxLength)}…`;
 }
 
-function findFirstDiff(localBody, remoteBody) {
+function findFirstDiff(localBody, remoteBody, withSnippets) {
   const localLines = localBody.split('\n');
   const remoteLines = remoteBody.split('\n');
   const max = Math.max(localLines.length, remoteLines.length);
@@ -68,35 +52,84 @@ function findFirstDiff(localBody, remoteBody) {
     if (localLine !== remoteLine) {
       return {
         line: i + 1,
-        local_line: truncateLine(localLine),
-        remote_line: truncateLine(remoteLine),
+        local_line: withSnippets ? truncateLine(localLine) : null,
+        remote_line: withSnippets ? truncateLine(remoteLine) : null,
       };
     }
   }
   return null;
 }
 
-function updateFrontmatterHash(originalText, newHash) {
-  const parsed = splitFrontmatter(originalText);
-  if (!parsed) {
-    throw new Error('Missing frontmatter');
-  }
-  const lines = parsed.frontmatter.split(/\r?\n/);
-  const existingIndex = lines.findIndex((line) => line.trim().startsWith('content-sha256:'));
-  const newLine = `content-sha256: ${newHash}`;
+function resolveStateSnapshotPath(filePath) {
+  if (!stateDir) return null;
+  return path.join(stateDir, 'snapshots', path.basename(filePath));
+}
 
-  if (existingIndex !== -1) {
-    lines[existingIndex] = newLine;
-  } else {
-    const redirectIndex = lines.findIndex((line) => line.trim().startsWith('redirect-link:'));
-    if (redirectIndex !== -1) {
-      lines.splice(redirectIndex + 1, 0, newLine);
-    } else {
-      lines.push(newLine);
+function readBaselineBody(filePath) {
+  const snapshotPath = resolveStateSnapshotPath(filePath);
+  if (snapshotPath && fs.existsSync(snapshotPath)) {
+    return {
+      body: normalizeBody(fs.readFileSync(snapshotPath, 'utf8')),
+      source: 'state',
+      snapshotPath,
+    };
+  }
+
+  return {
+    body: '',
+    source: 'none',
+    snapshotPath: null,
+  };
+}
+
+function writeBody(filePath, body) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, normalizeBody(body), 'utf8');
+}
+
+function loadManifest(filePath) {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`Manifest file not found: ${filePath}`);
+  }
+
+  const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  const documents = Array.isArray(raw) ? raw : raw.documents;
+
+  if (!Array.isArray(documents)) {
+    throw new Error(`Manifest must contain a documents array: ${filePath}`);
+  }
+
+  const normalizedDocs = documents.map((doc, idx) => {
+    const file = String(doc.file ?? '').trim();
+    const redirectLink = String(doc.redirect_link ?? '').trim();
+    const expectedHash = doc.content_sha256 ? String(doc.content_sha256).trim() : null;
+
+    if (!file) {
+      throw new Error(`Manifest document at index ${idx} is missing file`);
     }
-  }
 
-  return `---\n${lines.join('\n')}\n---\n${parsed.body}`;
+    if (!redirectLink) {
+      throw new Error(`Manifest document at index ${idx} is missing redirect_link`);
+    }
+
+    return {
+      file,
+      markdown_link: doc.markdown_link ? String(doc.markdown_link).trim() : null,
+      redirect_link: redirectLink,
+      content_sha256: expectedHash,
+    };
+  });
+
+  normalizedDocs.sort((a, b) => a.file.localeCompare(b.file));
+
+  return {
+    root: raw,
+    documents: normalizedDocs,
+    write(updatedDocuments) {
+      const payload = Array.isArray(raw) ? updatedDocuments : { ...raw, documents: updatedDocuments };
+      fs.writeFileSync(filePath, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+    },
+  };
 }
 
 async function fetchRemoteBody(url) {
@@ -112,59 +145,76 @@ async function fetchRemoteBody(url) {
 }
 
 async function main() {
-  const entries = fs
-    .readdirSync(docsDir)
-    .filter((file) => file.endsWith('.md'))
-    .map((file) => path.join(docsDir, file));
+  const manifest = loadManifest(manifestPath);
 
   const results = [];
   let changedCount = 0;
 
-  for (const file of entries) {
-    const text = fs.readFileSync(file, 'utf8');
-    const parsed = splitFrontmatter(text);
-    if (!parsed) {
-      throw new Error(`Missing frontmatter in ${file}`);
-    }
+  const updatedDocuments = [];
 
-    const frontmatterMap = parseFrontmatterMap(parsed.frontmatter);
-    const redirectLink = frontmatterMap.get('redirect-link');
-    const expectedHash = frontmatterMap.get('content-sha256') ?? null;
-
-    if (!redirectLink) {
-      throw new Error(`Missing redirect-link in ${file}`);
-    }
-
-    const localBody = normalizeBody(parsed.body);
-    const remoteBody = useLocal ? localBody : normalizeBody(await fetchRemoteBody(redirectLink));
+  for (const doc of manifest.documents) {
+    const baseline = readBaselineBody(doc.file);
+    const remoteBody = useLocal ? baseline.body : normalizeBody(await fetchRemoteBody(doc.redirect_link));
     const actualHash = sha256(remoteBody);
-    const changed = expectedHash !== actualHash;
-    const diff = changed ? findFirstDiff(localBody, remoteBody) : null;
+    const changed = doc.content_sha256 !== actualHash;
 
     if (changed) changedCount += 1;
 
-    if (updateFrontmatter) {
-      const updated = updateFrontmatterHash(text, actualHash);
-      fs.writeFileSync(file, updated, 'utf8');
+    const diff = changed && baseline.source !== 'none'
+      ? findFirstDiff(baseline.body, remoteBody, includeDiffSnippets)
+      : null;
+
+    let remoteSnapshotFile = null;
+    if (remoteSnapshotsDir) {
+      const remotePath = path.join(remoteSnapshotsDir, path.basename(doc.file));
+      writeBody(remotePath, remoteBody);
+      remoteSnapshotFile = path.relative(process.cwd(), remotePath);
     }
 
+    if (writeState) {
+      const snapshotPath = resolveStateSnapshotPath(doc.file);
+      if (!snapshotPath) {
+        throw new Error(`Unable to resolve state snapshot path for ${doc.file}`);
+      }
+      writeBody(snapshotPath, remoteBody);
+    }
+
+    const updatedDoc = {
+      ...doc,
+      content_sha256: updateManifest ? actualHash : doc.content_sha256,
+    };
+
+    updatedDocuments.push(updatedDoc);
+
     results.push({
-      file: path.relative(process.cwd(), file),
-      redirect_link: redirectLink,
-      expected_hash: expectedHash,
+      file: doc.file,
+      markdown_link: doc.markdown_link,
+      redirect_link: doc.redirect_link,
+      expected_hash: doc.content_sha256,
       actual_hash: actualHash,
       changed,
+      baseline_source: baseline.source,
+      baseline_snapshot_file: baseline.snapshotPath ? path.relative(process.cwd(), baseline.snapshotPath) : null,
+      remote_snapshot_file: remoteSnapshotFile,
       diff,
     });
+  }
+
+  if (updateManifest) {
+    manifest.write(updatedDocuments);
   }
 
   const payload = {
     changed: changedCount > 0,
     changed_count: changedCount,
+    state_dir: stateDir,
+    remote_snapshots_dir: remoteSnapshotsDir,
+    manifest_path: manifestPath,
     results,
   };
 
   if (outputPath) {
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     fs.writeFileSync(outputPath, JSON.stringify(payload, null, 2));
   }
 
@@ -177,11 +227,13 @@ async function main() {
     const lines = ['# GitHub documentation check', ''];
     for (const result of results) {
       const status = result.changed ? 'CHANGED' : 'OK';
-      lines.push(`- ${result.file}: ${status}`);
+      lines.push(`- ${result.file}: ${status} (baseline: ${result.baseline_source})`);
       if (result.changed && result.diff) {
         lines.push(`  - first diff line: ${result.diff.line}`);
-        lines.push(`  - local: ${result.diff.local_line}`);
-        lines.push(`  - remote: ${result.diff.remote_line}`);
+        if (includeDiffSnippets) {
+          lines.push(`  - local: ${result.diff.local_line}`);
+          lines.push(`  - remote: ${result.diff.remote_line}`);
+        }
       }
     }
     fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
@@ -189,11 +241,13 @@ async function main() {
     const lines = ['GitHub documentation check:'];
     for (const result of results) {
       const status = result.changed ? 'CHANGED' : 'OK';
-      lines.push(`- ${result.file}: ${status}`);
+      lines.push(`- ${result.file}: ${status} (baseline: ${result.baseline_source})`);
       if (result.changed && result.diff) {
         lines.push(`  - first diff line: ${result.diff.line}`);
-        lines.push(`  - local: ${result.diff.local_line}`);
-        lines.push(`  - remote: ${result.diff.remote_line}`);
+        if (includeDiffSnippets) {
+          lines.push(`  - local: ${result.diff.local_line}`);
+          lines.push(`  - remote: ${result.diff.remote_line}`);
+        }
       }
     }
     console.log(lines.join('\n'));

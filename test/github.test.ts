@@ -10,7 +10,12 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { isValidSample, parseRateLimitResponse, fetchRateLimit } from '../src/github';
+import {
+  GITHUB_API_VERSION,
+  isValidSample,
+  parseRateLimitResponse,
+  fetchRateLimit,
+} from '../src/github';
 import { FETCH_TIMEOUT_MS } from '../src/types';
 import type { RateLimitSample } from '../src/types';
 
@@ -96,7 +101,7 @@ describe('parseRateLimitResponse', () => {
     expect(result?.resources['core']).toBeDefined();
   });
 
-  it('parses response with all known buckets', () => {
+  it('parses response with supported buckets', () => {
     const result = parseRateLimitResponse(allBucketsResponse);
 
     expect(result).not.toBeNull();
@@ -105,7 +110,38 @@ describe('parseRateLimitResponse', () => {
     expect(buckets).toContain('search');
     expect(buckets).toContain('graphql');
     expect(buckets).toContain('integration_manifest');
-    expect(buckets).toContain('code_scanning_upload');
+    expect(buckets).toContain('copilot_usage_records');
+    expect(buckets).not.toContain('code_scanning_upload');
+  });
+
+  it('ignores deprecated code_scanning_upload if it still appears', () => {
+    const result = parseRateLimitResponse({
+      resources: {
+        core: { limit: 5000, used: 12, remaining: 4988, reset: 1706230800 },
+        code_scanning_upload: { limit: 5000, used: 12, remaining: 4988, reset: 1706230800 },
+        copilot_usage_records: { limit: 5000, used: 8, remaining: 4992, reset: 1706230800 },
+      },
+      rate: { limit: 5000, used: 12, remaining: 4988, reset: 1706230800 },
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.resources['core']).toBeDefined();
+    expect(result?.resources['copilot_usage_records']).toBeDefined();
+    expect(result?.resources['code_scanning_upload']).toBeUndefined();
+  });
+
+  it('preserves newly introduced rate-limit buckets without a whitelist change', () => {
+    const sample = { limit: 1000, used: 7, remaining: 993, reset: 1706230800 };
+    const result = parseRateLimitResponse({
+      resources: {
+        core: { limit: 5000, used: 12, remaining: 4988, reset: 1706230800 },
+        copilot_usage_records: sample,
+      },
+      rate: { limit: 5000, used: 12, remaining: 4988, reset: 1706230800 },
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.resources['copilot_usage_records']).toEqual(sample);
   });
 
   it('returns null for invalid response', () => {
@@ -251,6 +287,30 @@ describe('fetchRateLimit', () => {
     if (result.success) {
       expect(result.data.resources['core']).toBeDefined();
     }
+  });
+
+  it('requests the current GitHub REST API version', async () => {
+    const mockResponse = {
+      ok: true,
+      json: vi.fn().mockResolvedValue(standardResponse),
+    };
+    const mockFetch = vi.fn().mockResolvedValue(mockResponse);
+    vi.stubGlobal('fetch', mockFetch);
+
+    await fetchRateLimit('test-token');
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://api.github.com/rate_limit',
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer test-token',
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'github-api-usage-monitor',
+          'X-GitHub-Api-Version': GITHUB_API_VERSION,
+        },
+      }),
+    );
+    expect(GITHUB_API_VERSION).toBe('2026-03-10');
   });
 
   it('returns error for HTTP error response', async () => {
